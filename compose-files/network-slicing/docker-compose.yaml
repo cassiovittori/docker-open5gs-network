@@ -200,7 +200,8 @@ services:
         target: /UERANSIM/config/gnb.yaml
     depends_on:
       - amf
-      - smf
+      - smf1
+      - smf2
       - pcf
       - udr
 
@@ -238,6 +239,74 @@ services:
     depends_on:
       - gnb
 
+  prometheus:
+    container_name: prometheus
+    image: "prom/prometheus:v2.51.0"
+    networks:
+      open5gs:
+        aliases:
+          - metrics.prometheus.org
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+    volumes:
+      - prometheus_data:/prometheus
+    ports:
+      - "0.0.0.0:9090:9090/tcp"
+    depends_on:
+      - amf
+      - pcf
+      - smf1
+      - smf2
+      - upf1
+      - upf2
+
+  grafana:
+    container_name: grafana
+    image: "grafana/grafana-oss:10.4.0"
+    networks:
+      open5gs:
+        aliases:
+          - dashboard.grafana.org
+    configs:
+      - source: grafana_datasource
+        target: /etc/grafana/provisioning/datasources/open5gs_prometheus.yaml
+      - source: grafana_dashboard_provider
+        target: /etc/grafana/provisioning/dashboards/open5gs_metrics.yaml
+    volumes:
+      - ../../configs/metrics/grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=grafana
+    ports:
+      - "0.0.0.0:3000:3000/tcp"
+    depends_on:
+      - prometheus
+
+  webui:
+    container_name: webui
+    image: "webui:${OPEN5GS_VERSION}"
+    build:
+      context: ../../images/webui
+      args:
+        - OPEN5GS_VERSION=${OPEN5GS_VERSION}
+        - NODE_VERSION=${NODE_VERSION}
+    environment:
+      - DB_URI=mongodb://db.open5gs.org/open5gs
+      - PORT=9999
+      - HOSTNAME=0.0.0.0
+      - NODE_ENV=dev
+    command: "run dev"
+    networks:
+      open5gs:
+        aliases:
+          - webui.open5gs.org
+    depends_on:
+      - db
+    ports:
+      - "0.0.0.0:9999:9999/tcp"
+
+
 networks:
   open5gs:
     name: open5gs
@@ -251,12 +320,10 @@ networks:
 volumes:
   db_data:
     name: open5gs_db_data
-    labels:
-      org.open5gs.mongodb_version: ${MONGODB_VERSION}
   db_config:
     name: open5gs_db_config
-    labels:
-      org.open5gs.mongodb_version: ${MONGODB_VERSION}
+  prometheus_data:
+    name: open5gs_prometheus_data
 
 configs:
   nrf_config:
@@ -289,3 +356,9 @@ configs:
     file: ../../configs/network-slicing/ue1.yaml
   ue2_config:
     file: ../../configs/network-slicing/ue2.yaml
+  prometheus_config:
+    file: ../../configs/metrics/prometheus.yml
+  grafana_datasource:
+    file: ../../configs/metrics/grafana/datasource.yaml
+  grafana_dashboard_provider:
+    file: ../../configs/metrics/grafana/dashboard_provider.yaml
